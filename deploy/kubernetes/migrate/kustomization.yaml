@@ -1,0 +1,11 @@
+# Migration release unit. Applied with `kubectl apply`, then `kubectl wait --for=condition=complete`,
+# and only then is the application overlay applied (scripts/k8s-release.mjs prints the exact order).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - pairs: { app.kubernetes.io/part-of: portfolio-pilot }
+    includeSelectors: false
+    includeTemplates: true
+resources:
+  - job.yaml
+  - ../policies

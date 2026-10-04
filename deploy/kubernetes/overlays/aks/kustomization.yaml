@@ -1,0 +1,60 @@
+# PortfolioPilot on AKS (milestone 35, ADR 0027). Render only after the migration unit
+# (overlays/aks-migrate) has completed for the same RELEASE_ID:
+#   kubectl kustomize deploy/kubernetes/overlays/aks | kubectl apply --server-side -f -
+# Every environment value comes from release.env (copy release.env.example) through `replacements`;
+# RELEASE_PARAMETER marks each field that must be replaced, and `npm run validate:k8s` fails if one
+# survives rendering.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: portfolio-pilot
+resources:
+  - ../../base
+  - ../../gateway
+  - secret-provider-classes.yaml
+  - tls-sync.yaml
+components:
+  - ../../components/aks-platform
+patches:
+  - path: workload-identity.yaml
+configMapGenerator:
+  # Source of every replacement below. Annotated local-config, so it is never applied to the cluster.
+  - name: release-parameters
+    envs: [release.env]
+    options:
+      disableNameSuffixHash: true
+      annotations: { config.kubernetes.io/local-config: "true" }
+  - name: app-shared
+    behavior: merge
+    literals:
+      - DATABASE_AUTH=azure-workload-identity
+      - REDIS_AUTH=azure-workload-identity
+      - REDIS_URL=RELEASE_PARAMETER
+      - DATA_MODE=RELEASE_PARAMETER
+      - AGENT_MODE=RELEASE_PARAMETER
+      - AGENT_MODEL_ID=RELEASE_PARAMETER
+  - name: api-config
+    behavior: merge
+    literals:
+      - DATABASE_URL=RELEASE_PARAMETER
+      - REDIS_ENTRA_OBJECT_ID=RELEASE_PARAMETER
+      - ENTRA_CLIENT_ID=RELEASE_PARAMETER
+      - ENTRA_TENANT_ID=RELEASE_PARAMETER
+  - name: ingestion-config
+    behavior: merge
+    literals:
+      - DATABASE_URL=RELEASE_PARAMETER
+      - REDIS_ENTRA_OBJECT_ID=RELEASE_PARAMETER
+  - name: outbox-config
+    behavior: merge
+    literals:
+      - DATABASE_URL=RELEASE_PARAMETER
+      - REDIS_ENTRA_OBJECT_ID=RELEASE_PARAMETER
+  - name: agent-config
+    behavior: merge
+    literals:
+      - DATABASE_URL=RELEASE_PARAMETER
+      - REDIS_ENTRA_OBJECT_ID=RELEASE_PARAMETER
+      - SESSION_ARTIFACT_BACKEND=azure
+      - SESSION_BLOB_CONTAINER_URL=RELEASE_PARAMETER
+replacements:
+  - path: replacements.yaml

@@ -1,0 +1,100 @@
+# One public HTTPS origin (ADR 0027): the AKS application routing add-on's Gateway API implementation
+# (GatewayClass `approuting-istio`, managed Envoy proxies with their own HPA and PDB). /api goes straight
+# to the API Service; every other path goes to the static frontend. Port 80 only redirects.
+#
+# SSE (/api/events) through Envoy, without sticky sessions:
+#   - responses are streamed frame by frame (Envoy has no response buffering unless a buffer filter is
+#     configured; none is), and the route timeout is disabled for the stream only;
+#   - the API writes a heartbeat comment every 15 s, below Envoy's 5-minute stream idle timeout and the
+#     Azure Load Balancer's 4-minute TCP idle timeout, so an idle stream is never reaped;
+#   - any replica can serve any stream: each API replica reads Redis Streams independently and the
+#     browser resumes from its signed Last-Event-ID cursor after a drain, a scale-in or a gateway restart.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: portfolio-pilot
+spec:
+  gatewayClassName: approuting-istio
+  listeners:
+    - name: https
+      hostname: portfolio-pilot.invalid
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: portfolio-pilot-tls
+      allowedRoutes:
+        namespaces: { from: Same }
+    - name: http
+      hostname: portfolio-pilot.invalid
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces: { from: Same }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: https-redirect
+spec:
+  parentRefs:
+    - { name: portfolio-pilot, sectionName: http }
+  hostnames: [portfolio-pilot.invalid]
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect: { scheme: https, port: 443, statusCode: 301 }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: portfolio-pilot
+spec:
+  parentRefs:
+    - { name: portfolio-pilot, sectionName: https }
+  hostnames: [portfolio-pilot.invalid]
+  rules:
+    # Long-lived authenticated event stream: no route timeout (0s disables it). Liveness is the API's
+    # heartbeat, and the API itself ends streams on drain or session expiry.
+    - matches:
+        - path: { type: Exact, value: /api/events }
+      timeouts: { request: 0s }
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - { name: X-Content-Type-Options, value: nosniff }
+              - { name: Referrer-Policy, value: strict-origin-when-cross-origin }
+              - { name: Strict-Transport-Security, value: max-age=31536000 }
+      backendRefs:
+        - { name: api, port: 3001 }
+    # Ordinary API calls: bounded. The longest legitimate request is a live article analysis that the
+    # API waits for (AGENT_WALL_CLOCK_MS 90 s); agent chat runs are durable jobs and return 202 at once.
+    - matches:
+        - path: { type: PathPrefix, value: /api }
+      timeouts: { request: 120s }
+      filters:
+        # The same headers nginx adds to /api in the single-container origin (docker/nginx).
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - { name: X-Content-Type-Options, value: nosniff }
+              - { name: Referrer-Policy, value: strict-origin-when-cross-origin }
+              - { name: X-Frame-Options, value: DENY }
+              - { name: Cross-Origin-Opener-Policy, value: same-origin }
+              - { name: Strict-Transport-Security, value: max-age=31536000 }
+      backendRefs:
+        - { name: api, port: 3001 }
+    # Static frontend (nginx sets CSP, cache policy and SPA fallback).
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      timeouts: { request: 30s }
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - { name: Strict-Transport-Security, value: max-age=31536000 }
+      backendRefs:
+        - { name: web, port: 8080 }

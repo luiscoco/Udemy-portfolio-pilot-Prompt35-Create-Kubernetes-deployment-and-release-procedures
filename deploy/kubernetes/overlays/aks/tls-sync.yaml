@@ -1,0 +1,59 @@
+# Keeps the gateway certificate synced from Key Vault (SecretProviderClass gateway-tls) with its own
+# identity, which may read only the two gateway-tls-* secrets. It reuses the released web image so no
+# extra registry is needed, mounts the certificate files, and only sleeps. Rotation: upload new PEM
+# versions to Key Vault; within one 2-minute poll the Secret updates and the gateway reloads it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pp-tls-sync
+  labels: { app.kubernetes.io/part-of: portfolio-pilot }
+  annotations: { azure.workload.identity/client-id: RELEASE_PARAMETER }
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tls-sync
+  labels: { app.kubernetes.io/name: tls-sync, app.kubernetes.io/component: certificate-sync, app.kubernetes.io/part-of: portfolio-pilot }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: { app.kubernetes.io/name: tls-sync }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tls-sync
+        app.kubernetes.io/component: certificate-sync
+        app.kubernetes.io/part-of: portfolio-pilot
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: pp-tls-sync
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 5
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: sync
+          image: portfolio-pilot-web
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "trap 'exit 0' TERM INT; while :; do sleep 3600 & wait $!; done"]
+          resources:
+            requests: { cpu: 5m, memory: 8Mi }
+            limits: { cpu: 50m, memory: 32Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: gateway-tls, mountPath: /mnt/gateway-tls, readOnly: true }
+      volumes:
+        - name: gateway-tls
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes: { secretProviderClass: gateway-tls }

@@ -1,0 +1,256 @@
+# One image, three independently scaled roles (WORKER_ROLE). Workers receive no traffic: readiness only
+# gates rollouts (it fails as soon as a drain starts) and liveness restarts a wedged process.
+# Duplicate replicas are safe by design: ingestion holds a fenced PostgreSQL lease, the outbox dispatcher
+# claims leased batches, and agent jobs are claimed with SKIP LOCKED and fenced run leases.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-ingestion
+  labels: { app.kubernetes.io/name: worker-ingestion, app.kubernetes.io/component: worker }
+spec:
+  # Only one replica ever holds the ingestion lease; a second replica is a warm standby, not throughput.
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels: { app.kubernetes.io/name: worker-ingestion }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: worker-ingestion, app.kubernetes.io/component: worker }
+    spec:
+      serviceAccountName: pp-ingestion
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # WORKER_SHUTDOWN_GRACE_MS (25 s) + margin: the current bounded pass finishes, then exit 0.
+      terminationGracePeriodSeconds: 35
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: worker
+          image: portfolio-pilot-worker
+          imagePullPolicy: IfNotPresent
+          args:
+            - sh
+            - -c
+            - 'for f in /mnt/secrets/*; do [ -f "$f" ] && export "${f##*/}=$(cat "$f")"; done; exec node apps/worker/dist/index.js'
+          ports:
+            - { name: health, containerPort: 8081, protocol: TCP }
+          envFrom:
+            - configMapRef: { name: app-shared }
+            - configMapRef: { name: ingestion-config }
+          env:
+            - name: INSTANCE_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          resources:
+            requests: { cpu: 50m, memory: 192Mi }
+            limits: { cpu: 500m, memory: 384Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          startupProbe:
+            httpGet: { path: /health/live, port: health }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /health/ready, port: health }
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /health/live, port: health }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-outbox
+  labels: { app.kubernetes.io/name: worker-outbox, app.kubernetes.io/component: worker }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels: { app.kubernetes.io/name: worker-outbox }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: worker-outbox, app.kubernetes.io/component: worker }
+    spec:
+      serviceAccountName: pp-outbox
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 35
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: worker
+          image: portfolio-pilot-worker
+          imagePullPolicy: IfNotPresent
+          args:
+            - sh
+            - -c
+            - 'for f in /mnt/secrets/*; do [ -f "$f" ] && export "${f##*/}=$(cat "$f")"; done; exec node apps/worker/dist/index.js'
+          ports:
+            - { name: health, containerPort: 8081, protocol: TCP }
+          envFrom:
+            - configMapRef: { name: app-shared }
+            - configMapRef: { name: outbox-config }
+          env:
+            - name: INSTANCE_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          resources:
+            requests: { cpu: 50m, memory: 192Mi }
+            # Headroom for the Claude Code subprocess of the shared article analysis (AGENT_MODE=claude).
+            limits: { cpu: 500m, memory: 768Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          startupProbe:
+            httpGet: { path: /health/live, port: health }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /health/ready, port: health }
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /health/live, port: health }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: agent-workspace, mountPath: /var/lib/portfolio-pilot/agent-workspace }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+        - name: agent-workspace
+          emptyDir: { sizeLimit: 256Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-agent
+  labels: { app.kubernetes.io/name: worker-agent, app.kubernetes.io/component: worker }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    # The new pod starts claiming jobs while the old one finishes its runs.
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels: { app.kubernetes.io/name: worker-agent }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: worker-agent, app.kubernetes.io/component: worker }
+    spec:
+      serviceAccountName: pp-agent
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # WORKER_SHUTDOWN_GRACE_MS (100 s) lets a run started just before the drain reach its 90 s wall
+      # clock; then it is aborted and persists a truthful interrupted outcome. Plus margin.
+      terminationGracePeriodSeconds: 115
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: worker
+          image: portfolio-pilot-worker
+          imagePullPolicy: IfNotPresent
+          args:
+            - sh
+            - -c
+            - 'for f in /mnt/secrets/*; do [ -f "$f" ] && export "${f##*/}=$(cat "$f")"; done; exec node apps/worker/dist/index.js'
+          ports:
+            - { name: health, containerPort: 8081, protocol: TCP }
+          envFrom:
+            - configMapRef: { name: app-shared }
+            - configMapRef: { name: agent-config }
+          env:
+            - name: INSTANCE_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          resources:
+            requests: { cpu: 200m, memory: 384Mi }
+            # AGENT_WORKER_CONCURRENCY=2 Claude Code subprocesses at most.
+            limits: { cpu: 1500m, memory: 1536Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          startupProbe:
+            httpGet: { path: /health/live, port: health }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /health/ready, port: health }
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /health/live, port: health }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            # Ephemeral SDK workspace (recreated empty per pod); durable snapshots go to Blob in AKS.
+            - { name: agent-workspace, mountPath: /var/lib/portfolio-pilot/agent-workspace }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+        - name: agent-workspace
+          emptyDir: { sizeLimit: 1Gi }
+---
+# Single-replica workers must still let nodes drain: maxUnavailable 1 allows the eviction, the pod
+# drains on SIGTERM, and leases/claims let the replacement continue. minAvailable 1 would block upgrades.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: worker-ingestion
+spec:
+  maxUnavailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels: { app.kubernetes.io/name: worker-ingestion }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: worker-outbox
+spec:
+  maxUnavailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels: { app.kubernetes.io/name: worker-outbox }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: worker-agent
+spec:
+  maxUnavailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels: { app.kubernetes.io/name: worker-agent }

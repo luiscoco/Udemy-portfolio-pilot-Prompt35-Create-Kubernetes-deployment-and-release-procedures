@@ -1,0 +1,6 @@
+# Default-deny and DNS for every PortfolioPilot pod. Shared by the application (base) and the
+# migration unit (migrate), so the first migration Job of a fresh namespace is already restricted.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - baseline.yaml

@@ -1,0 +1,54 @@
+# AKS egress. Data services are reachable only through their private endpoints in the
+# private-endpoint subnet (docs/azure/network.md): PostgreSQL 5432, Azure Managed Redis 10000 and Blob
+# 443. Public HTTPS is needed for Entra token exchange (every workload identity) and for the providers
+# (Anthropic, Alpaca). NAT does not filter host names: host-level restriction stays in the application
+# (fixed provider endpoints, no redirects; milestone 29). Private and link-local ranges are excluded,
+# which also blocks the node's instance metadata endpoint (169.254.169.254) from these pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: data-services-egress
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [api, worker-ingestion, worker-outbox, worker-agent] }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: { cidr: 10.40.8.0/24 }
+      ports:
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 10000 }
+        - { protocol: TCP, port: 443 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: public-https-egress
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [api, worker-ingestion, worker-outbox, worker-agent] }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
+      ports:
+        - { protocol: TCP, port: 443 }
+---
+# The migration Job reaches PostgreSQL only (password role; no token exchange).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: migrate-egress
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: db-migrate }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: { cidr: 10.40.8.0/24 }
+      ports:
+        - { protocol: TCP, port: 5432 }

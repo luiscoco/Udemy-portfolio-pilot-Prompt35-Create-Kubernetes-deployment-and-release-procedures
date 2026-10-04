@@ -1,0 +1,196 @@
+# Generated layout, hand-maintained: one entry per release.env key (see release.env.example).
+# Each target field holds RELEASE_PARAMETER in the resources/patches until replaced here.
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.PUBLIC_HOSTNAME }
+    targets:
+      - select: { kind: Gateway, name: portfolio-pilot }
+        fieldPaths:
+          - spec.listeners.[name=https].hostname
+          - spec.listeners.[name=http].hostname
+      - select: { kind: HTTPRoute }
+        fieldPaths:
+          - spec.hostnames.0
+      - select: { kind: ConfigMap, name: app-shared }
+        fieldPaths:
+          - data.AUTH_BASE_URL
+        options: { delimiter: "//", index: 1 }
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.WEB_IMAGE }
+    targets:
+      - select: { kind: Deployment, name: web }
+        fieldPaths:
+          - spec.template.spec.containers.[name=web].image
+      - select: { kind: Deployment, name: tls-sync }
+        fieldPaths:
+          - spec.template.spec.containers.[name=sync].image
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.API_IMAGE }
+    targets:
+      - select: { kind: Deployment, name: api }
+        fieldPaths:
+          - spec.template.spec.containers.[name=api].image
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.WORKER_IMAGE }
+    targets:
+      - select: { kind: Deployment, name: worker-ingestion }
+        fieldPaths:
+          - spec.template.spec.containers.[name=worker].image
+      - select: { kind: Deployment, name: worker-outbox }
+        fieldPaths:
+          - spec.template.spec.containers.[name=worker].image
+      - select: { kind: Deployment, name: worker-agent }
+        fieldPaths:
+          - spec.template.spec.containers.[name=worker].image
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.DATA_MODE }
+    targets:
+      - select: { kind: ConfigMap, name: app-shared }
+        fieldPaths:
+          - data.DATA_MODE
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.AGENT_MODE }
+    targets:
+      - select: { kind: ConfigMap, name: app-shared }
+        fieldPaths:
+          - data.AGENT_MODE
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.AGENT_MODEL_ID }
+    targets:
+      - select: { kind: ConfigMap, name: app-shared }
+        fieldPaths:
+          - data.AGENT_MODEL_ID
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.REDIS_URL }
+    targets:
+      - select: { kind: ConfigMap, name: app-shared }
+        fieldPaths:
+          - data.REDIS_URL
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.AZURE_TENANT_ID }
+    targets:
+      - select: { kind: SecretProviderClass, name: api-secrets }
+        fieldPaths:
+          - spec.parameters.tenantId
+      - select: { kind: SecretProviderClass, name: ingestion-secrets }
+        fieldPaths:
+          - spec.parameters.tenantId
+      - select: { kind: SecretProviderClass, name: outbox-secrets }
+        fieldPaths:
+          - spec.parameters.tenantId
+      - select: { kind: SecretProviderClass, name: agent-secrets }
+        fieldPaths:
+          - spec.parameters.tenantId
+      - select: { kind: SecretProviderClass, name: gateway-tls }
+        fieldPaths:
+          - spec.parameters.tenantId
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.KEY_VAULT_NAME }
+    targets:
+      - select: { kind: SecretProviderClass, name: api-secrets }
+        fieldPaths:
+          - spec.parameters.keyvaultName
+      - select: { kind: SecretProviderClass, name: ingestion-secrets }
+        fieldPaths:
+          - spec.parameters.keyvaultName
+      - select: { kind: SecretProviderClass, name: outbox-secrets }
+        fieldPaths:
+          - spec.parameters.keyvaultName
+      - select: { kind: SecretProviderClass, name: agent-secrets }
+        fieldPaths:
+          - spec.parameters.keyvaultName
+      - select: { kind: SecretProviderClass, name: gateway-tls }
+        fieldPaths:
+          - spec.parameters.keyvaultName
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.PRIVATE_ENDPOINT_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: data-services-egress }
+        fieldPaths:
+          - spec.egress.0.to.0.ipBlock.cidr
+      - select: { kind: NetworkPolicy, name: migrate-egress }
+        fieldPaths:
+          - spec.egress.0.to.0.ipBlock.cidr
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.SESSION_BLOB_CONTAINER_URL }
+    targets:
+      - select: { kind: ConfigMap, name: agent-config }
+        fieldPaths:
+          - data.SESSION_BLOB_CONTAINER_URL
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.API_DATABASE_URL }
+    targets:
+      - select: { kind: ConfigMap, name: api-config }
+        fieldPaths:
+          - data.DATABASE_URL
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.API_OBJECT_ID }
+    targets:
+      - select: { kind: ConfigMap, name: api-config }
+        fieldPaths:
+          - data.REDIS_ENTRA_OBJECT_ID
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.API_CLIENT_ID }
+    targets:
+      - select: { kind: ServiceAccount, name: pp-api }
+        fieldPaths:
+          - metadata.annotations.[azure.workload.identity/client-id]
+      - select: { kind: SecretProviderClass, name: api-secrets }
+        fieldPaths:
+          - spec.parameters.clientID
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.INGESTION_DATABASE_URL }
+    targets:
+      - select: { kind: ConfigMap, name: ingestion-config }
+        fieldPaths:
+          - data.DATABASE_URL
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.INGESTION_OBJECT_ID }
+    targets:
+      - select: { kind: ConfigMap, name: ingestion-config }
+        fieldPaths:
+          - data.REDIS_ENTRA_OBJECT_ID
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.INGESTION_CLIENT_ID }
+    targets:
+      - select: { kind: ServiceAccount, name: pp-ingestion }
+        fieldPaths:
+          - metadata.annotations.[azure.workload.identity/client-id]
+      - select: { kind: SecretProviderClass, name: ingestion-secrets }
+        fieldPaths:
+          - spec.parameters.clientID
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.OUTBOX_DATABASE_URL }
+    targets:
+      - select: { kind: ConfigMap, name: outbox-config }
+        fieldPaths:
+          - data.DATABASE_URL
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.OUTBOX_OBJECT_ID }
+    targets:
+      - select: { kind: ConfigMap, name: outbox-config }
+        fieldPaths:
+          - data.REDIS_ENTRA_OBJECT_ID
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.OUTBOX_CLIENT_ID }
+    targets:
+      - select: { kind: ServiceAccount, name: pp-outbox }
+        fieldPaths:
+          - metadata.annotations.[azure.workload.identity/client-id]
+      - select: { kind: SecretProviderClass, name: outbox-secrets }
+        fieldPaths:
+          - spec.parameters.clientID
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.AGENT_DATABASE_URL }
+    targets:
+      - select: { kind: ConfigMap, name: agent-config }
+        fieldPaths:
+          - data.DATABASE_URL
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.AGENT_OBJECT_ID }
+    targets:
+      - select: { kind: ConfigMap, name: agent-config }
+        fieldPaths:
+          - data.REDIS_ENTRA_OBJECT_ID
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.AGENT_CLIENT_ID }
+    targets:
+      - select: { kind: ServiceAccount, name: pp-agent }
+        fieldPaths:
+          - metadata.annotations.[azure.workload.identity/client-id]
+      - select: { kind: SecretProviderClass, name: agent-secrets }
+        fieldPaths:
+          - spec.parameters.clientID
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.TLS_CLIENT_ID }
+    targets:
+      - select: { kind: ServiceAccount, name: pp-tls-sync }
+        fieldPaths:
+          - metadata.annotations.[azure.workload.identity/client-id]
+      - select: { kind: SecretProviderClass, name: gateway-tls }
+        fieldPaths:
+          - spec.parameters.clientID
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.ENTRA_CLIENT_ID }
+    targets:
+      - select: { kind: ConfigMap, name: api-config }
+        fieldPaths:
+          - data.ENTRA_CLIENT_ID
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.ENTRA_TENANT_ID }
+    targets:
+      - select: { kind: ConfigMap, name: api-config }
+        fieldPaths:
+          - data.ENTRA_TENANT_ID

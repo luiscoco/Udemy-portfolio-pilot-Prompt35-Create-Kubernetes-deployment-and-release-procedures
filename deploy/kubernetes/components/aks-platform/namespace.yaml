@@ -1,0 +1,14 @@
+# Pod Security Admission. Every PortfolioPilot pod meets `restricted` (npm run validate:k8s checks it
+# statically). Enforcement stays at `baseline` because the add-on-managed gateway proxies run in this
+# namespace and their pod template is not ours to change; `restricted` violations still warn and audit.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: portfolio-pilot
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: v1.35
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: v1.35
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: v1.35

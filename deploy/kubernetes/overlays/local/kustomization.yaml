@@ -1,0 +1,57 @@
+# LOCAL ONLY (kind + upstream Istio, npm run verify:k8s-local): the production base and gateway with
+# the local demo profile (loopback origin https://localhost:8443, demo sign-in, deterministic mocks),
+# locally built :local images and in-cluster data services (overlays/local-data). Secrets come from the
+# Secret `local-app`, created at random by the verify script and mounted where AKS mounts Key Vault.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: portfolio-pilot
+resources:
+  - ../../base
+  - ../../gateway
+images:
+  - { name: portfolio-pilot-web, newName: portfolio-pilot-web, newTag: local }
+  - { name: portfolio-pilot-api, newName: portfolio-pilot-api, newTag: local }
+  - { name: portfolio-pilot-worker, newName: portfolio-pilot-worker, newTag: local }
+configMapGenerator:
+  - name: app-shared
+    behavior: merge
+    literals:
+      # The demo profile is refused unless NODE_ENV != production and the origin is loopback.
+      - NODE_ENV=development
+      - DEMO_AUTH_ENABLED=true
+      - AUTH_BASE_URL=https://localhost:8443
+      - REDIS_URL=redis://redis:6379
+      - MOCK_NEWS_INTERVAL_MS=2000
+      - AGENT_MOCK_STREAM_DELAY_MS=150
+  - name: ingestion-config
+    behavior: merge
+    literals: [INGESTION_INTERVAL_MS=2000]
+  - name: outbox-config
+    behavior: merge
+    literals: [OUTBOX_POLL_MS=250]
+  - name: agent-config
+    behavior: merge
+    literals: [SESSION_ARTIFACT_BACKEND=local]
+patches:
+  # Upstream Istio's class instead of the AKS-managed `approuting-istio`; a ClusterIP proxy Service
+  # (kind has no load balancer; the verify script port-forwards to it); loopback host names.
+  - target: { kind: Gateway, name: portfolio-pilot }
+    patch: |-
+      - op: replace
+        path: /spec/gatewayClassName
+        value: istio
+      - op: add
+        path: /metadata/annotations
+        value: { networking.istio.io/service-type: ClusterIP }
+      - op: replace
+        path: /spec/listeners/0/hostname
+        value: localhost
+      - op: replace
+        path: /spec/listeners/1/hostname
+        value: localhost
+  - target: { kind: HTTPRoute }
+    patch: |-
+      - op: replace
+        path: /spec/hostnames/0
+        value: localhost
+  - path: secrets.yaml

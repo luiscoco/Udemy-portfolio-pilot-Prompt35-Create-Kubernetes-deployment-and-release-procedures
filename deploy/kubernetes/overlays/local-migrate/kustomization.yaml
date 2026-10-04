@@ -1,0 +1,22 @@
+# LOCAL ONLY: the same migration Job against the in-cluster PostgreSQL. Its DATABASE_URL file comes from
+# the Secret `local-migrate` (created at random by the verify script), mounted where AKS mounts Key Vault.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: portfolio-pilot
+resources:
+  - ../../migrate
+patches:
+  - target: { kind: Job, name: db-migrate-release }
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: db-migrate-local
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: portfolio-pilot-migrate:local
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value: { name: secrets, mountPath: /mnt/secrets, readOnly: true }
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value: { name: secrets, secret: { secretName: local-migrate, defaultMode: 0440 } }

@@ -1,0 +1,8 @@
+# Shared by both AKS units (application and migration): the namespace with its Pod Security labels and
+# the data-service / public HTTPS egress policies. The private-endpoint CIDR is replaced from
+# release.env (PRIVATE_ENDPOINT_CIDR) by each overlay.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - namespace.yaml
+  - network-policies.yaml

@@ -1,0 +1,31 @@
+# PortfolioPilot application workloads (milestone 35). Environment-neutral: no images by digest, no
+# identities, no data-service addresses and no secrets. Render an overlay, never this base:
+#   kubectl kustomize deploy/kubernetes/overlays/aks      (release.env required; see README there)
+#   kubectl kustomize deploy/kubernetes/overlays/local    (kind; npm run verify:k8s-local)
+# The migration Job is a separate unit (deploy/kubernetes/migrate) applied and awaited BEFORE this one.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - pairs: { app.kubernetes.io/part-of: portfolio-pilot }
+    includeSelectors: false
+    includeTemplates: true
+resources:
+  - service-accounts.yaml
+  - web.yaml
+  - api.yaml
+  - workers.yaml
+  - network-policies.yaml
+  - ../policies
+# Settings every API and worker replica must share (milestone 30 limits live in shared PostgreSQL/Redis),
+# plus one ConfigMap per workload. The name hash makes a config change roll the Deployments.
+configMapGenerator:
+  - name: app-shared
+    envs: [config/shared.env]
+  - name: api-config
+    envs: [config/api.env]
+  - name: ingestion-config
+    envs: [config/ingestion.env]
+  - name: outbox-config
+    envs: [config/outbox.env]
+  - name: agent-config
+    envs: [config/agent.env]

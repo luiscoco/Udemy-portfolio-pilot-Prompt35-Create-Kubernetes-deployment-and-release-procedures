@@ -1,0 +1,107 @@
+# Workload identity for the four runtime workloads: the pod label lets the AKS webhook project an
+# audience-bound token and inject AZURE_CLIENT_ID/AZURE_TENANT_ID/AZURE_FEDERATED_TOKEN_FILE, which the
+# app uses for PostgreSQL/Redis/Blob sign-in (DATABASE_AUTH/REDIS_AUTH=azure-workload-identity). The
+# Key Vault CSI volume (read with the same identity) holds the secrets the entry command exports.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  template:
+    metadata:
+      labels: { azure.workload.identity/use: "true" }
+    spec:
+      containers:
+        - name: api
+          volumeMounts:
+            - { name: secrets, mountPath: /mnt/secrets, readOnly: true }
+      volumes:
+        - name: secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes: { secretProviderClass: api-secrets }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-ingestion
+spec:
+  template:
+    metadata:
+      labels: { azure.workload.identity/use: "true" }
+    spec:
+      containers:
+        - name: worker
+          volumeMounts:
+            - { name: secrets, mountPath: /mnt/secrets, readOnly: true }
+      volumes:
+        - name: secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes: { secretProviderClass: ingestion-secrets }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-outbox
+spec:
+  template:
+    metadata:
+      labels: { azure.workload.identity/use: "true" }
+    spec:
+      containers:
+        - name: worker
+          volumeMounts:
+            - { name: secrets, mountPath: /mnt/secrets, readOnly: true }
+      volumes:
+        - name: secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes: { secretProviderClass: outbox-secrets }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-agent
+spec:
+  template:
+    metadata:
+      labels: { azure.workload.identity/use: "true" }
+    spec:
+      containers:
+        - name: worker
+          volumeMounts:
+            - { name: secrets, mountPath: /mnt/secrets, readOnly: true }
+      volumes:
+        - name: secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes: { secretProviderClass: agent-secrets }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pp-api
+  annotations: { azure.workload.identity/client-id: RELEASE_PARAMETER }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pp-ingestion
+  annotations: { azure.workload.identity/client-id: RELEASE_PARAMETER }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pp-outbox
+  annotations: { azure.workload.identity/client-id: RELEASE_PARAMETER }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pp-agent
+  annotations: { azure.workload.identity/client-id: RELEASE_PARAMETER }

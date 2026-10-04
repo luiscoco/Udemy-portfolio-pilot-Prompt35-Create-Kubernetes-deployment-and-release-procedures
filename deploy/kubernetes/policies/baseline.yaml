@@ -1,0 +1,30 @@
+# Default deny for every PortfolioPilot pod, then only the flows the architecture needs. Enforced by
+# Cilium on AKS (Azure CNI Overlay + Cilium). Data-service and internet egress depend on the
+# environment and are added by each overlay. The managed gateway proxy pods are not part-of this app
+# and are left to the add-on (docs/kubernetes/networking.md).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/part-of: portfolio-pilot }
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/part-of: portfolio-pilot }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }

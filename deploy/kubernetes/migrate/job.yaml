@@ -1,0 +1,57 @@
+# One-off release step (ADR 0027): `prisma migrate deploy` with the migration role, run and awaited
+# BEFORE the application rollout, never from API pods. Prisma takes a PostgreSQL advisory lock, so even
+# an accidental second Job waits instead of applying twice. A failed migration is not retried
+# automatically (backoffLimit 0): it needs an operator decision (docs/kubernetes/database-releases.md).
+# The name ends in the release ID (overlay replacement) so every release creates a new, immutable Job.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate-release
+  labels: { app.kubernetes.io/name: db-migrate, app.kubernetes.io/component: migration }
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  # Keep the pod and its log for a week of release forensics.
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: db-migrate, app.kubernetes.io/component: migration }
+    spec:
+      restartPolicy: Never
+      serviceAccountName: pp-migrate
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: migrate
+          image: portfolio-pilot-migrate
+          imagePullPolicy: IfNotPresent
+          # The migration URL (with the pp_migrator password) is read from a mounted file into this
+          # process only: it never becomes a Kubernetes Secret, a pod env entry or a log line.
+          args:
+            - sh
+            - -c
+            - 'test -s /mnt/secrets/DATABASE_URL || { echo "DATABASE_URL secret file is missing" >&2; exit 2; }; DATABASE_URL="$(cat /mnt/secrets/DATABASE_URL)"; export DATABASE_URL; exec node /app/node_modules/prisma/build/index.js migrate deploy'
+          resources:
+            requests: { cpu: 100m, memory: 192Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pp-migrate
+automountServiceAccountToken: false

@@ -1,0 +1,13 @@
+# LOCAL ONLY: throwaway cluster for npm run verify:k8s-local. Kubernetes 1.35 matches the pinned AKS
+# minor (infra/azure/parameters/dev.bicepparam). kindnet enforces NetworkPolicy (kind >= 0.24).
+# Two workers so PodDisruptionBudgets, topology spreading and `kubectl drain` are exercised for real.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: pp-m35
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0
+  - role: worker
+    image: kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0
+  - role: worker
+    image: kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0

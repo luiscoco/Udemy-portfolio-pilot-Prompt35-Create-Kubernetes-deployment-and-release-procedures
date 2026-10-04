@@ -1,0 +1,13 @@
+# LOCAL ONLY (kind, npm run verify:k8s-local): namespace and throwaway data services, applied first.
+# Expects the Secret `local-postgres` (key `password`), which the verify script creates at random.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: portfolio-pilot
+labels:
+  - pairs: { app.kubernetes.io/part-of: portfolio-pilot }
+    includeSelectors: false
+    includeTemplates: true
+resources:
+  - namespace.yaml
+  - data-services.yaml
+  - ../../policies

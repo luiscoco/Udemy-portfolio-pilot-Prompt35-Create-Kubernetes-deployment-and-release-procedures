@@ -1,0 +1,28 @@
+# The migration Job signs in to PostgreSQL with the pp_migrator PASSWORD role (Prisma's schema engine
+# needs a URL with a password); workload identity is used only by the Key Vault CSI driver to read that
+# URL with the migration identity, which may read the database-migrator-url secret and nothing else.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate-release
+spec:
+  template:
+    metadata:
+      labels: { azure.workload.identity/use: "true" }
+    spec:
+      containers:
+        - name: migrate
+          volumeMounts:
+            - { name: secrets, mountPath: /mnt/secrets, readOnly: true }
+      volumes:
+        - name: secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes: { secretProviderClass: migrate-secrets }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pp-migrate
+  annotations: { azure.workload.identity/client-id: RELEASE_PARAMETER }

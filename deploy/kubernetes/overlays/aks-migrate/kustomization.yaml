@@ -1,0 +1,58 @@
+# Migration release unit on AKS. It shares release.env with the application overlay, so it must be
+# rendered with the load restrictor relaxed (scripts/k8s-release.mjs always does):
+#   kubectl kustomize --load-restrictor=LoadRestrictionsNone deploy/kubernetes/overlays/aks-migrate
+# The Job name ends in RELEASE_ID: one immutable Job per release, awaited before the app rollout.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: portfolio-pilot
+resources:
+  - ../../migrate
+  - secret-provider-class.yaml
+components:
+  - ../../components/aks-platform
+patches:
+  - path: workload-identity.yaml
+configMapGenerator:
+  - name: release-parameters
+    envs: [../aks/release.env]
+    options:
+      disableNameSuffixHash: true
+      annotations: { config.kubernetes.io/local-config: "true" }
+replacements:
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.RELEASE_ID }
+    targets:
+      - select: { kind: Job, name: db-migrate-release }
+        fieldPaths:
+          - metadata.name
+        options: { delimiter: "-", index: 2 }
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.MIGRATE_IMAGE }
+    targets:
+      - select: { kind: Job }
+        fieldPaths:
+          - spec.template.spec.containers.[name=migrate].image
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.MIGRATE_CLIENT_ID }
+    targets:
+      - select: { kind: ServiceAccount, name: pp-migrate }
+        fieldPaths:
+          - metadata.annotations.[azure.workload.identity/client-id]
+      - select: { kind: SecretProviderClass, name: migrate-secrets }
+        fieldPaths:
+          - spec.parameters.clientID
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.AZURE_TENANT_ID }
+    targets:
+      - select: { kind: SecretProviderClass, name: migrate-secrets }
+        fieldPaths:
+          - spec.parameters.tenantId
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.KEY_VAULT_NAME }
+    targets:
+      - select: { kind: SecretProviderClass, name: migrate-secrets }
+        fieldPaths:
+          - spec.parameters.keyvaultName
+  - source: { kind: ConfigMap, name: release-parameters, fieldPath: data.PRIVATE_ENDPOINT_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: data-services-egress }
+        fieldPaths:
+          - spec.egress.0.to.0.ipBlock.cidr
+      - select: { kind: NetworkPolicy, name: migrate-egress }
+        fieldPaths:
+          - spec.egress.0.to.0.ipBlock.cidr
