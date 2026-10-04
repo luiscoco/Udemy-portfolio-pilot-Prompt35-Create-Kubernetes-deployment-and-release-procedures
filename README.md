@@ -1,4 +1,4 @@
-# PortfolioPilot — Milestone 35: Kubernetes deployment and release procedures
+# Kubernetes deployment and release procedures
 
 PortfolioPilot is a teaching project: a stock portfolio manager with a live news feed, AI chat built
 on the Claude Agent SDK, watchlists and alerts. It is built one milestone at a time. This README
